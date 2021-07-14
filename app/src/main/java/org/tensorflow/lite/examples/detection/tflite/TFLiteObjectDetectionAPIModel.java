@@ -25,6 +25,9 @@ import android.util.Pair;
 
 import com.google.gson.Gson;
 
+import org.tensorflow.lite.Interpreter;
+import org.tensorflow.lite.examples.detection.env.Logger;
+
 import java.io.BufferedReader;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -39,8 +42,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Vector;
-import org.tensorflow.lite.Interpreter;
-import org.tensorflow.lite.examples.detection.env.Logger;
 
 /**
  * Wrapper for frozen detection models trained using the Tensorflow Object Detection API:
@@ -93,20 +94,20 @@ public class TFLiteObjectDetectionAPIModel
 
   private Interpreter tfLite;
 
-// Face Mask Detector Output
+  // Face Mask Detector Output
   private float[][] output;
   private final Gson gson = new Gson();
 
   private HashMap<String, Recognition> registered = new HashMap<>();
   public void register(String name, Recognition rec) {
-      registered.put(name, rec);
+    registered.put(name, rec);
   }
 
   private TFLiteObjectDetectionAPIModel() {}
 
   /** Memory-map the model file in Assets. */
   private static MappedByteBuffer loadModelFile(AssetManager assets, String modelFilename)
-      throws IOException {
+          throws IOException {
     AssetFileDescriptor fileDescriptor = assets.openFd(modelFilename);
     FileInputStream inputStream = new FileInputStream(fileDescriptor.getFileDescriptor());
     FileChannel fileChannel = inputStream.getChannel();
@@ -125,12 +126,12 @@ public class TFLiteObjectDetectionAPIModel
    * @param isQuantized Boolean representing model is quantized or not
    */
   public static SimilarityClassifier create(
-      final AssetManager assetManager,
-      final String modelFilename,
-      final String labelFilename,
-      final int inputSize,
-      final boolean isQuantized)
-      throws IOException {
+          final AssetManager assetManager,
+          final String modelFilename,
+          final String labelFilename,
+          final int inputSize,
+          final boolean isQuantized)
+          throws IOException {
 
     final TFLiteObjectDetectionAPIModel d = new TFLiteObjectDetectionAPIModel();
 
@@ -176,22 +177,26 @@ public class TFLiteObjectDetectionAPIModel
   // and retrurns the pair <id, distance>
   private Pair<String, Float> findNearest(float[] emb) {
 
-    Log.e("REGISTERED",gson.toJson(registered));
-
     Pair<String, Float> ret = null;
     for (Map.Entry<String, Recognition> entry : registered.entrySet()) {
-        final String name = entry.getKey();
-        final float[] knownEmb = ((float[][]) entry.getValue().getExtra())[0];
+      final String name = entry.getKey();
 
-        float distance = 0;
-        for (int i = 0; i < emb.length; i++) {
-              float diff = emb[i] - knownEmb[i];
-              distance += diff*diff;
+      float distance = 0;
+      ArrayList arrList = (ArrayList) entry.getValue().getExtra();
+      for (Object mappedFloat : arrList) {
+
+        Log.e("mappedFace",gson.toJson(mappedFloat));
+        ArrayList element = (ArrayList) mappedFloat;
+        for (int i = 0; i < element.size(); i++) {
+          float diff = emb[i] - Float.parseFloat(String.valueOf(element.get(i)));
+          distance += diff*diff;
         }
+
         distance = (float) Math.sqrt(distance);
         if (ret == null || distance < ret.second) {
-            ret = new Pair<>(name, distance);
+          ret = new Pair<>(name, distance);
         }
+      }
     }
     return ret;
   }
@@ -259,18 +264,18 @@ public class TFLiteObjectDetectionAPIModel
     String label = "?";
 
     if (registered.size() > 0) {
-        //LOGGER.i("dataset SIZE: " + registered.size());
-        final Pair<String, Float> nearest = findNearest(embeedings[0]);
-        if (nearest != null) {
+      //LOGGER.i("dataset SIZE: " + registered.size());
+      final Pair<String, Float> nearest = findNearest(embeedings[0]);
+      if (nearest != null) {
 
-            final String name = nearest.first;
-            label = name;
-            distance = nearest.second;
+        final String name = nearest.first;
+        label = name;
+        distance = nearest.second;
 
-            LOGGER.i("nearest: " + name + " - distance: " + distance);
+        LOGGER.i("nearest: " + name + " - distance: " + distance);
 
 
-        }
+      }
     }
 
 
@@ -285,7 +290,7 @@ public class TFLiteObjectDetectionAPIModel
     recognitions.add( rec );
 
     if (storeExtra) {
-        rec.setExtra(embeedings);
+      rec.setExtra(embeedings);
     }
 
     Trace.endSection();

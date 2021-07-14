@@ -37,12 +37,13 @@ import android.graphics.Paint.Style;
 import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.hardware.camera2.CameraCharacteristics;
+import android.icu.number.LocalizedNumberFormatter;
 import android.media.ImageReader.OnImageAvailableListener;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.SystemClock;
+import android.os.Trace;
 import android.provider.MediaStore;
-import android.util.Base64;
 import android.util.Log;
 import android.util.Size;
 import android.util.TypedValue;
@@ -58,6 +59,7 @@ import androidx.core.app.ActivityCompat;
 import com.google.android.gms.tasks.OnSuccessListener;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
 import com.google.mlkit.vision.common.InputImage;
 import com.google.mlkit.vision.face.Face;
 import com.google.mlkit.vision.face.FaceDetection;
@@ -73,10 +75,13 @@ import org.tensorflow.lite.examples.detection.tflite.SimilarityClassifier;
 import org.tensorflow.lite.examples.detection.tflite.TFLiteObjectDetectionAPIModel;
 import org.tensorflow.lite.examples.detection.tracking.MultiBoxTracker;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * An activity that uses a TensorFlowMultiBoxDetector and ObjectTracker to detect and then track
@@ -173,7 +178,7 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
             }
         });
 
-//     Real-time contour detection of multiple faces
+        //     Real-time contour detection of multiple faces
         FaceDetectorOptions options =
                 new FaceDetectorOptions.Builder()
                         .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
@@ -219,13 +224,12 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
                                 public void onSuccess(List<Face> faces) {
                                     if (faces.size() == 0) {
                                         updateResults(currTimestamp, new LinkedList<>());
-                                        return;
+                                        addPending = false;
                                     }
                                     runInBackground(
                                             new Runnable() {
                                                 @Override
                                                 public void run() {
-//                                  onFacesDetected(currTimestamp, faces, addPending);
                                                     //asdf 3
                                                     detector.enableStatLogging(true);
                                                     List<SimilarityClassifier.Recognition> mappedFaces = loopThroughFaces(currTimestamp, faces,selectedImage);
@@ -233,6 +237,7 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
                                                         showAddFaceDialog(mappedFace, true);
                                                     }
                                                     addPending = false;
+                                                    faceDetector.close();
                                                 }
                                             });
                                 }
@@ -275,13 +280,11 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
             SharedPreferences sharedPref = getApplicationContext().getSharedPreferences(
                     getString(R.string.tfe_od_local), Context.MODE_PRIVATE);
             String prevLocalImage = sharedPref.getString(getString(R.string.tfe_od_local), "kosong");
-            Log.e("asdf","prevLocalImage: " + prevLocalImage);
+
             if(!prevLocalImage.equals("kosong")) {
                 SimilarityClassifier.Recognition prevRec = gson.fromJson(prevLocalImage, SimilarityClassifier.Recognition.class);
-                Log.e("asdf","prevRec: " + gson.toJson(prevRec));
 
                 if(detector != null){
-                    Log.e("asdf","REREGISTER PREV REC: ");
                     detector.register("User",prevRec);
                 }
             }
@@ -492,20 +495,21 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
             @Override
             public void onClick(DialogInterface dlg, int i) {
                 //aaaaaa
-                if(manualAdd){
 
-                    SharedPreferences sharedPreferences = getApplicationContext().getSharedPreferences(
-                            getString(R.string.tfe_od_local), Context.MODE_PRIVATE);
-                    SharedPreferences.Editor editor = sharedPreferences.edit();
-                    Log.e("asdf","gsontoJson: " + gson.toJson(rec));
-                    editor.putString(getString(R.string.tfe_od_local), gson.toJson(rec));
-                    editor.apply();
-                }
 
                 String name = etName.getText().toString();
                 if (name.isEmpty()) {
                     return;
                 }
+
+                if(manualAdd){
+                    SharedPreferences sharedPreferences = getApplicationContext().getSharedPreferences(
+                            getString(R.string.tfe_od_local), Context.MODE_PRIVATE);
+                    SharedPreferences.Editor editor = sharedPreferences.edit();
+                    editor.putString(getString(R.string.tfe_od_local), gson.toJson(rec));
+                    editor.apply();
+                }
+
                 Log.e("name",name);
                 Log.e("rec",gson.toJson(rec));
                 detector.register(name, rec);
@@ -576,6 +580,7 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
     }
 
     private void onFacesDetected(long currTimestamp, List<Face> faces, boolean add) {
+
         cropCopyBitmap = Bitmap.createBitmap(croppedBitmap);
         final Canvas canvas = new Canvas(cropCopyBitmap);
         final Paint paint = new Paint();
@@ -619,8 +624,8 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
 
         for (Face face : faces) {
 
-            LOGGER.i("FACE" + face.toString());
-            LOGGER.i("Running detection on face " + currTimestamp);
+            Log.e("FACE" , face.toString());
+            Log.e("detection on face " , String.valueOf(currTimestamp));
             //results = detector.recognizeImage(croppedBitmap);
 
             final RectF boundingBox = new RectF(face.getBoundingBox());
@@ -662,6 +667,7 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
                 }
 
                 final long startTime = SystemClock.uptimeMillis();
+                Log.e("faceBmp",gson.toJson(faceBmp));
                 final List<SimilarityClassifier.Recognition> resultsAux = detector.recognizeImage(faceBmp, add);
                 lastProcessingTimeMs = SystemClock.uptimeMillis() - startTime;
 
@@ -734,10 +740,32 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
         try {
             imgBitmap = ImageDecoder.decodeBitmap(source);
             Bitmap mutableBitmap = imgBitmap.copy(Bitmap.Config.ARGB_8888, true);
+            InputImage image = InputImage.fromBitmap(imgBitmap, 0);
+
+            int fileWidth = image.getWidth();
+            int fileHeight = image.getHeight();
+
+            portraitBmp = Bitmap.createBitmap(fileWidth, fileHeight, Config.ARGB_8888);
+            rgbFrameBitmap = Bitmap.createBitmap(fileWidth, fileHeight, Config.ARGB_8888);
+            cropCopyBitmap = Bitmap.createBitmap(croppedBitmap);
+            final Canvas canvas = new Canvas(cropCopyBitmap);
+            final Paint paint = new Paint();
+            paint.setColor(Color.RED);
+            paint.setStyle(Style.STROKE);
+            paint.setStrokeWidth(2.0f);
+
+            float minimumConfidence = MINIMUM_CONFIDENCE_TF_OD_API;
+            switch (MODE) {
+                case TF_OD_API:
+                    minimumConfidence = MINIMUM_CONFIDENCE_TF_OD_API;
+                    break;
+            }
+
+            //final List<Classifier.Recognition> results = new ArrayList<>();
 
             // Note this can be done only once
-            int sourceW = rgbFrameBitmap.getWidth();
-            int sourceH = rgbFrameBitmap.getHeight();
+            int sourceW = portraitBmp.getWidth();
+            int sourceH = portraitBmp.getHeight();
             int targetW = portraitBmp.getWidth();
             int targetH = portraitBmp.getHeight();
             Matrix transform = createTransform(
@@ -748,10 +776,22 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
                     sensorOrientation);
             final Canvas cv = new Canvas(portraitBmp);
 
+//            int sourceW = rgbFrameBitmap.getWidth();
+//            int sourceH = rgbFrameBitmap.getHeight();
+//            int targetW = portraitBmp.getWidth();
+//            int targetH = portraitBmp.getHeight();
+//            Matrix transform = createTransform(
+//                    sourceW,
+//                    sourceH,
+//                    targetW,
+//                    targetH,
+//                    sensorOrientation);
+//            final Canvas cv = new Canvas(portraitBmp);
+
             // draws the original image in portrait mode.
             cv.drawBitmap(rgbFrameBitmap, transform, null);
 
-            final Canvas cvFace = new Canvas(mutableBitmap);
+            final Canvas cvFace = new Canvas(faceBmp);
 
             boolean saved = false;
 
@@ -771,6 +811,7 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
                     cropToFrameTransform.mapRect(boundingBox);
 
                     // maps original coordinates to portrait coordinates
+
                     RectF faceBB = new RectF(boundingBox);
                     transform.mapRect(faceBB);
 
@@ -782,13 +823,24 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
                     matrix.postTranslate(-faceBB.left, -faceBB.top);
                     matrix.postScale(sx, sy);
 
-                    cvFace.drawBitmap(portraitBmp, matrix, null);
+                    cvFace.drawBitmap(mutableBitmap, matrix, null);
+
+                    //canvas.drawRect(faceBB, paint);
 
                     String label = "";
                     float confidence = -1f;
-                    int color = Color.BLUE;
+                    Integer color = Color.BLUE;
                     Object extra = null;
-                    Bitmap crop = Bitmap.createBitmap(mutableBitmap);
+                    Bitmap crop = null;
+
+//                    crop = Bitmap.createBitmap(imgBitmap,
+//                            (int) 0,
+//                            (int) 0,
+//                            (int) (faceBB.width() - 1),
+//                            (int) (faceBB.height() - 1));
+
+                    crop = Bitmap.createBitmap(fileWidth,fileHeight,portraitBmp.getConfig());
+
 
                     final long startTime = SystemClock.uptimeMillis();
                     final List<SimilarityClassifier.Recognition> resultsAux = detector.recognizeImage(faceBmp, true);
@@ -799,9 +851,10 @@ public class DetectorActivity extends CameraActivity implements OnImageAvailable
                         SimilarityClassifier.Recognition result = resultsAux.get(0);
 
                         extra = result.getExtra();
-                        if (extra != null) {
-                            Log.e("embeeding",gson.toJson(extra));
-                        }
+//          Object extra = result.getExtra();
+//          if (extra != null) {
+//            LOGGER.i("embeeding retrieved " + extra.toString());
+//          }
 
                         float conf = result.getDistance();
                         if (conf < 1.0f) {
